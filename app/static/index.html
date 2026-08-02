@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Residence Optimizer</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #fff; --border: #e2e5ea; --text: #1c2530;
+    --muted: #6b7686; --accent: #2b6cb0; --target: #e05c4a; --living: #2f8f5b;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: var(--text); }
+  #app { display: flex; height: 100vh; }
+  #sidebar { width: 360px; min-width: 360px; background: var(--panel); border-right: 1px solid var(--border);
+             display: flex; flex-direction: column; overflow: hidden; }
+  #map { flex: 1; }
+  header { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  header h1 { margin: 0; font-size: 16px; }
+  header p { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
+  .scroll { flex: 1; overflow-y: auto; padding: 12px 16px; }
+  .section-title { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+                   margin: 18px 0 8px; display: flex; justify-content: space-between; align-items: center; }
+  .search { position: relative; }
+  .search input { width: 100%; padding: 9px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; }
+  .results-dropdown { position: absolute; z-index: 500; left: 0; right: 0; background: #fff; border: 1px solid var(--border);
+                      border-radius: 8px; margin-top: 4px; box-shadow: 0 6px 18px rgba(0,0,0,.12); max-height: 240px; overflow-y: auto; }
+  .results-dropdown div { padding: 8px 10px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #f0f1f4; }
+  .results-dropdown div:hover { background: #f3f6fb; }
+  .add-row { display: flex; gap: 8px; margin-top: 10px; }
+  .add-row button { flex: 1; padding: 9px; border: 1px solid var(--border); background: #fff; border-radius: 8px;
+                    cursor: pointer; font-size: 13px; font-weight: 600; }
+  .add-row button.active { color: #fff; border-color: transparent; }
+  .add-row button.target.active { background: var(--target); }
+  .add-row button.living.active { background: var(--living); }
+  .hint { font-size: 11px; color: var(--muted); margin-top: 6px; min-height: 14px; }
+  .card { border: 1px solid var(--border); border-radius: 10px; padding: 10px; margin-bottom: 8px; }
+  .card .name { font-size: 13px; font-weight: 600; margin-bottom: 6px; word-break: break-word; }
+  .card .row { display: flex; gap: 8px; align-items: center; }
+  .card select, .card input { padding: 5px 6px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; }
+  .card input[type=number] { width: 58px; }
+  .card .del { margin-left: auto; border: none; background: none; color: var(--muted); cursor: pointer; font-size: 16px; }
+  .living-card { display: flex; gap: 10px; align-items: flex-start; }
+  .rank { width: 26px; height: 26px; min-width: 26px; border-radius: 50%; background: var(--living); color: #fff;
+          display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; }
+  .living-body { flex: 1; }
+  .weekly { font-size: 15px; font-weight: 700; }
+  .weekly small { font-weight: 400; color: var(--muted); font-size: 11px; }
+  .breakdown { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .empty { font-size: 12px; color: var(--muted); font-style: italic; }
+  .warn { background: #fff6e5; border: 1px solid #f0d9a8; color: #8a5a00; padding: 8px 10px; border-radius: 8px;
+          font-size: 12px; margin: 12px 16px; }
+  .marker-pin { font-size: 20px; line-height: 1; text-shadow: 0 1px 2px rgba(0,0,0,.4); }
+  .living-marker { width: 26px; height: 26px; border-radius: 50%; background: var(--living); color: #fff; border: 2px solid #fff;
+                   display: flex; align-items: center; justify-content: center; font-weight: 700; box-shadow: 0 1px 4px rgba(0,0,0,.4); }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="sidebar">
+    <header>
+      <h1>Residence Optimizer</h1>
+      <p>Rank potential homes by total weekly commute time.</p>
+    </header>
+    <div id="keywarn" class="warn" style="display:none">
+      No routing API key configured. Add <code>ORS_API_KEY</code> to <code>.env</code> and restart.
+    </div>
+    <div class="scroll">
+      <div class="search">
+        <input id="search" placeholder="Search a place to add…" autocomplete="off" />
+        <div id="searchResults" class="results-dropdown" style="display:none"></div>
+      </div>
+      <div class="add-row">
+        <button id="addTargetBtn" class="target">📍 Add target</button>
+        <button id="addLivingBtn" class="living">🏠 Add home</button>
+      </div>
+      <div class="hint" id="hint">Pick a mode, then click the map — or use search above.</div>
+
+      <div class="section-title">Target places <span id="tcount"></span></div>
+      <div id="targets"></div>
+
+      <div class="section-title">Potential homes <span id="lcount"></span></div>
+      <div id="living"></div>
+    </div>
+  </div>
+  <div id="map"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const MODES = {
+  car:     { emoji: "🚗", label: "Car" },
+  bike:    { emoji: "🚲", label: "Bike" },
+  foot:    { emoji: "🚶", label: "Foot" },
+  transit: { emoji: "🚌", label: "Transit" },
+};
+
+let state = { targets: [], living: [] };
+let placing = null;               // "target" | "living" | null
+let lastResults = [];             // ranking from server, keyed by living index
+let markers = { targets: {}, living: {} };
+let searchInsertMode = "target";  // what a search pick becomes
+
+function load() {
+  try { state = JSON.parse(localStorage.getItem("residence-optimizer") || "") || state; } catch (e) {}
+  if (!state.targets) state.targets = [];
+  if (!state.living) state.living = [];
+}
+function save() { localStorage.setItem("residence-optimizer", JSON.stringify(state)); }
+const uid = () => Math.random().toString(36).slice(2, 9);
+
+// ---------- Map ----------
+const map = L.map("map").setView([48.8566, 2.3522], 12);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  attribution: "&copy; OpenStreetMap contributors", maxZoom: 19,
+}).addTo(map);
+
+map.on("click", (e) => {
+  if (!placing) return;
+  addPlace(placing, e.latlng.lat, e.latlng.lng);
+  setPlacing(null);
+});
+
+function setPlacing(mode) {
+  placing = mode;
+  document.getElementById("addTargetBtn").classList.toggle("active", mode === "target");
+  document.getElementById("addLivingBtn").classList.toggle("active", mode === "living");
+  document.getElementById("map").style.cursor = mode ? "crosshair" : "";
+  document.getElementById("hint").textContent = mode
+    ? `Click on the map to place a ${mode === "target" ? "target" : "home"}.`
+    : "Pick a mode, then click the map — or use search above.";
+}
+
+function addPlace(kind, lat, lng, name) {
+  name = name || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+  if (kind === "target") {
+    state.targets.push({ id: uid(), name, lat, lng, mode: "car", trips: 3 });
+  } else {
+    state.living.push({ id: uid(), name, lat, lng });
+  }
+  save(); render(); compute();
+}
+
+// ---------- Rendering ----------
+function render() {
+  renderTargets();
+  renderLiving();
+  renderMarkers();
+  document.getElementById("tcount").textContent = state.targets.length || "";
+  document.getElementById("lcount").textContent = state.living.length || "";
+}
+
+function renderTargets() {
+  const el = document.getElementById("targets");
+  if (!state.targets.length) { el.innerHTML = `<div class="empty">No targets yet.</div>`; return; }
+  el.innerHTML = "";
+  state.targets.forEach((t) => {
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `
+      <div class="name">${MODES[t.mode].emoji} ${escapeHtml(shortName(t.name))}</div>
+      <div class="row">
+        <select data-id="${t.id}" class="mode">
+          ${Object.entries(MODES).map(([k, v]) => `<option value="${k}" ${k === t.mode ? "selected" : ""}>${v.label}</option>`).join("")}
+        </select>
+        <input type="number" min="0" step="1" value="${t.trips}" data-id="${t.id}" class="trips" title="round trips / week" />
+        <span style="font-size:11px;color:var(--muted)">×/week</span>
+        <button class="del" data-id="${t.id}" data-kind="target" title="Remove">✕</button>
+      </div>`;
+    el.appendChild(card);
+  });
+}
+
+function renderLiving() {
+  const el = document.getElementById("living");
+  if (!state.living.length) { el.innerHTML = `<div class="empty">No homes yet.</div>`; return; }
+  const rankOf = {};
+  lastResults.forEach((r, i) => { rankOf[r.index] = { rank: i + 1, ...r }; });
+  el.innerHTML = "";
+  state.living.forEach((h, idx) => {
+    const res = rankOf[idx];
+    const card = document.createElement("div");
+    card.className = "card living-card";
+    let weekly = `<span class="empty">—</span>`, breakdown = "";
+    if (res && res.weekly_minutes != null) {
+      weekly = `<span class="weekly">${fmtDuration(res.weekly_minutes)} <small>/ week</small></span>`;
+      breakdown = `<div class="breakdown">${state.targets.map((t, ti) => {
+        const b = res.breakdown[ti];
+        return `${MODES[t.mode].emoji} ${b && b.one_way_min != null ? fmtDuration(b.one_way_min) + " each way" : "—"}`;
+      }).join(" · ")}</div>`;
+    } else if (res && !res.reachable) {
+      weekly = `<span class="empty">unreachable</span>`;
+    }
+    card.innerHTML = `
+      <div class="rank">${res ? res.rank : "?"}</div>
+      <div class="living-body">
+        <div class="name">${escapeHtml(shortName(h.name))}</div>
+        ${weekly}${breakdown}
+      </div>
+      <button class="del" data-id="${h.id}" data-kind="living" title="Remove">✕</button>`;
+    el.appendChild(card);
+  });
+}
+
+function renderMarkers() {
+  Object.values(markers.targets).forEach((m) => map.removeLayer(m));
+  Object.values(markers.living).forEach((m) => map.removeLayer(m));
+  markers = { targets: {}, living: {} };
+
+  state.targets.forEach((t) => {
+    const icon = L.divIcon({ className: "", html: `<div class="marker-pin">${MODES[t.mode].emoji}</div>`, iconSize: [24, 24], iconAnchor: [12, 12] });
+    markers.targets[t.id] = L.marker([t.lat, t.lng], { icon }).addTo(map).bindPopup(escapeHtml(shortName(t.name)));
+  });
+  const rankOf = {};
+  lastResults.forEach((r, i) => { rankOf[r.index] = i + 1; });
+  state.living.forEach((h, idx) => {
+    const rank = rankOf[idx] || "?";
+    const icon = L.divIcon({ className: "", html: `<div class="living-marker">${rank}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] });
+    markers.living[h.id] = L.marker([h.lat, h.lng], { icon }).addTo(map).bindPopup(escapeHtml(shortName(h.name)));
+  });
+}
+
+// ---------- Compute ----------
+let computeTimer = null;
+function compute() {
+  clearTimeout(computeTimer);
+  computeTimer = setTimeout(doCompute, 400);
+}
+async function doCompute() {
+  if (!state.living.length || !state.targets.length) { lastResults = []; renderLiving(); renderMarkers(); return; }
+  try {
+    const r = await fetch("/api/compute", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        living: state.living.map((h) => ({ lat: h.lat, lng: h.lng })),
+        targets: state.targets.map((t) => ({ lat: t.lat, lng: t.lng, mode: t.mode, trips: Number(t.trips) || 0 })),
+      }),
+    });
+    if (!r.ok) { console.warn(await r.text()); return; }
+    lastResults = (await r.json()).results || [];
+    renderLiving(); renderMarkers();
+  } catch (e) { console.warn(e); }
+}
+
+// ---------- Search / geocode ----------
+const searchInput = document.getElementById("search");
+const searchResults = document.getElementById("searchResults");
+let searchTimer = null;
+searchInput.addEventListener("input", () => {
+  clearTimeout(searchTimer);
+  const q = searchInput.value.trim();
+  if (q.length < 3) { searchResults.style.display = "none"; return; }
+  searchTimer = setTimeout(async () => {
+    const r = await fetch("/api/geocode", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: q }),
+    });
+    const items = await r.json();
+    if (!items.length) { searchResults.style.display = "none"; return; }
+    searchResults.innerHTML = "";
+    items.forEach((it) => {
+      const d = document.createElement("div");
+      d.textContent = it.name;
+      d.onclick = () => {
+        addPlace(searchInsertMode, it.lat, it.lng, it.name);
+        map.setView([it.lat, it.lng], 13);
+        searchInput.value = ""; searchResults.style.display = "none";
+      };
+      searchResults.appendChild(d);
+    });
+    searchResults.style.display = "block";
+  }, 350);
+});
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".search")) searchResults.style.display = "none";
+});
+
+// ---------- Events ----------
+document.getElementById("addTargetBtn").onclick = () => { searchInsertMode = "target"; setPlacing(placing === "target" ? null : "target"); };
+document.getElementById("addLivingBtn").onclick = () => { searchInsertMode = "living"; setPlacing(placing === "living" ? null : "living"); };
+
+document.getElementById("targets").addEventListener("change", (e) => {
+  const id = e.target.dataset.id;
+  const t = state.targets.find((x) => x.id === id);
+  if (!t) return;
+  if (e.target.classList.contains("mode")) t.mode = e.target.value;
+  if (e.target.classList.contains("trips")) t.trips = Number(e.target.value) || 0;
+  save(); render(); compute();
+});
+document.body.addEventListener("click", (e) => {
+  if (!e.target.classList.contains("del")) return;
+  const { id, kind } = e.target.dataset;
+  state[kind === "target" ? "targets" : "living"] =
+    state[kind === "target" ? "targets" : "living"].filter((x) => x.id !== id);
+  save(); render(); compute();
+});
+
+// ---------- Utils ----------
+function shortName(n) { return n.split(",").slice(0, 2).join(",").trim(); }
+function escapeHtml(s) { return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+function fmtDuration(min) {
+  min = Math.round(min);
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60), m = min % 60;
+  return m ? `${h}h${String(m).padStart(2, "0")}` : `${h}h`;
+}
+
+// ---------- Init ----------
+(async function init() {
+  load();
+  try {
+    const cfg = await (await fetch("/api/config")).json();
+    if (!cfg.has_key) document.getElementById("keywarn").style.display = "block";
+  } catch (e) {}
+  render();
+  if (state.living.length || state.targets.length) {
+    const all = [...state.targets, ...state.living];
+    if (all.length) map.fitBounds(all.map((p) => [p.lat, p.lng]), { padding: [40, 40], maxZoom: 14 });
+    compute();
+  }
+})();
+</script>
+</body>
+</html>
