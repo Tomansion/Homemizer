@@ -84,7 +84,12 @@
   .card-popup .living-card .del::after { content: " Remove"; }
   .living-marker { width: 42px; height: 22px; border-radius: 11px; background: var(--living); color: #fff; border: 2px solid #fff;
                    display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700;
-                   box-shadow: 0 1px 4px rgba(0,0,0,.4); }
+                   box-shadow: 0 1px 4px rgba(0,0,0,.4); transition: transform .12s ease, box-shadow .12s ease; }
+  /* Hovering a home in the sidebar makes its marker pop out of the map. */
+  #living .card:hover { border-color: var(--living); }
+  .leaflet-marker-icon.highlight { z-index: 1000 !important; }
+  .highlight .living-marker { transform: scale(1.3);
+                              box-shadow: 0 0 0 5px rgba(47,143,91,.3), 0 2px 8px rgba(0,0,0,.45); }
   .cog-marker { width: 26px; height: 26px; border-radius: 50%; background: #fff; border: 2px dashed var(--cog);
                 color: var(--cog); display: flex; align-items: center; justify-content: center;
                 font-size: 15px; line-height: 1; box-shadow: 0 1px 4px rgba(0,0,0,.3); }
@@ -219,6 +224,7 @@ function targetCard(t) {
 function livingCard(h, res) {
   const card = document.createElement("div");
   card.className = "card living-card";
+  card.dataset.id = h.id;  // lets the sidebar tie a hovered card to its marker
   let weekly = `<span class="empty">—</span>`;
   if (res && res.weekly_minutes != null) {
     weekly = `<span class="weekly">${fmtDuration(res.weekly_minutes)} <small>/ week total</small></span>`;
@@ -430,6 +436,20 @@ document.addEventListener("click", (e) => {
 // ---------- Events ----------
 document.getElementById("addTargetBtn").onclick = () => { searchInsertMode = "target"; setPlacing(placing === "target" ? null : "target"); };
 document.getElementById("addLivingBtn").onclick = () => { searchInsertMode = "living"; setPlacing(placing === "living" ? null : "living"); };
+
+// Hovering a home card in the sidebar highlights its marker on the map.
+// Bound to the list only, so the same card shown inside a popup stays inert.
+const livingList = document.getElementById("living");
+livingList.addEventListener("mouseover", (e) => hoverHome(e, true));
+livingList.addEventListener("mouseout", (e) => hoverHome(e, false));
+function hoverHome(e, on) {
+  const card = e.target.closest(".card");
+  // mouseover/mouseout also fire while moving between a card's own children.
+  if (!card || (e.relatedTarget && card.contains(e.relatedTarget))) return;
+  const marker = markers.living[card.dataset.id];
+  const el = marker && marker.getElement();
+  if (el) el.classList.toggle("highlight", on);
+}
 
 // Delegated on <body> so target cards work in the sidebar and in map popups alike.
 document.body.addEventListener("change", (e) => {

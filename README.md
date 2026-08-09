@@ -68,7 +68,8 @@ Open <http://localhost:8000>.
 3. Click **🏠 Add home**, then place candidate homes.
 4. Homes are listed best first, each with a score: **100%** is the shortest
    total weekly commute, 50% means twice as long. Homes a few minutes apart
-   score almost the same.
+   score almost the same. Hover a home in the list to make its marker pop out
+   on the map.
 5. Uncheck a target to leave it out of the totals without deleting it
    (it stays on the map, greyed out, drops out of the centre of gravity, and
    costs no routing call).
