@@ -16,8 +16,15 @@ ranked by **total weekly commute time**.
 - **Transit** — no free real-time transit API exists, so transit time is
   estimated from the car-network distance at an average door-to-door speed
   (`TRANSIT_SPEED_KMH`, default 20 km/h).
-- **Ranking** — for each home: `Σ (one-way time × 2 × trips_per_week)` over all
-  targets, i.e. total round-trip minutes spent commuting each week.
+- **Scoring** — for each home: `Σ (one-way time × 2 × trips_per_week)` over all
+  targets, i.e. total round-trip minutes spent commuting each week. That total
+  becomes a percentage against the best home (`100 × best / total`), so homes
+  within a few minutes of each other read as equivalent. Each home lists the
+  per-target detail: one-way time and the cumulated weekly time it contributes.
+- **Caching** — one-way times are cached server-side per
+  `(home, target, transport mode)`. Only never-seen pairs are sent to
+  OpenRouteService, so changing a target's frequency (or re-ranking existing
+  places) costs no API call.
 
 Your places are saved in the browser (localStorage).
 
@@ -51,4 +58,8 @@ Open <http://localhost:8000>.
 1. Click **📍 Add target**, then click the map (or use search) to place a spot
    you regularly go to. Set its transport mode and trips per week.
 2. Click **🏠 Add home**, then place candidate homes.
-3. Homes are ranked automatically — number 1 is the shortest total weekly commute.
+3. Homes are listed best first, each with a score: **100%** is the shortest
+   total weekly commute, 50% means twice as long. Homes a few minutes apart
+   score almost the same.
+4. Uncheck a target to leave it out of the totals without deleting it
+   (it stays on the map, greyed out, and costs no routing call).

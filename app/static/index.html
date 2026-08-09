@@ -37,23 +37,45 @@
   .hint { font-size: 11px; color: var(--muted); margin-top: 6px; min-height: 14px; }
   .card { border: 1px solid var(--border); border-radius: 10px; padding: 10px; margin-bottom: 8px; }
   .card .name { font-size: 13px; font-weight: 600; margin-bottom: 6px; word-break: break-word; }
+  .card .name label { display: flex; gap: 6px; align-items: flex-start; cursor: pointer; }
+  .card .name input[type=checkbox] { margin: 2px 0 0; cursor: pointer; }
+  .card.off { background: #fafbfc; }
+  .card.off .name, .card.off .row { opacity: .5; }
+  .card.off .name input[type=checkbox] { opacity: 1; }
   .card .row { display: flex; gap: 8px; align-items: center; }
   .card select, .card input { padding: 5px 6px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; }
   .card input[type=number] { width: 58px; }
   .card .del { margin-left: auto; border: none; background: none; color: var(--muted); cursor: pointer; font-size: 16px; }
   .living-card { display: flex; gap: 10px; align-items: flex-start; }
-  .rank { width: 26px; height: 26px; min-width: 26px; border-radius: 50%; background: var(--living); color: #fff;
-          display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; }
+  .score { flex: 0 0 auto; min-width: 44px; padding: 3px 0; border-radius: 11px; color: #fff; text-align: center;
+           font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .score.na, .living-marker.na { background: var(--muted); }
   .living-body { flex: 1; }
   .weekly { font-size: 15px; font-weight: 700; }
   .weekly small { font-weight: 400; color: var(--muted); font-size: 11px; }
   .breakdown { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .legs { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 4px; }
+  .leg { padding: 4px 0; border-bottom: 1px dashed #eef0f3; }
+  .leg:last-child { border-bottom: none; }
+  .leg-top { display: flex; align-items: baseline; gap: 8px; font-size: 12px; }
+  .leg-name { width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .leg-total { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .leg-total.na { font-weight: 400; color: var(--muted); font-style: italic; }
+  .leg.off .leg-name, .leg.off .leg-sub { opacity: .55; }
+  .leg.off .leg-total { font-weight: 400; color: var(--muted); font-style: italic; }
+  .leg-sub { font-size: 11px; color: var(--muted); margin-top: 1px; font-variant-numeric: tabular-nums; }
   .empty { font-size: 12px; color: var(--muted); font-style: italic; }
   .warn { background: #fff6e5; border: 1px solid #f0d9a8; color: #8a5a00; padding: 8px 10px; border-radius: 8px;
           font-size: 12px; margin: 12px 16px; }
-  .marker-pin { font-size: 20px; line-height: 1; text-shadow: 0 1px 2px rgba(0,0,0,.4); }
-  .living-marker { width: 26px; height: 26px; border-radius: 50%; background: var(--living); color: #fff; border: 2px solid #fff;
-                   display: flex; align-items: center; justify-content: center; font-weight: 700; box-shadow: 0 1px 4px rgba(0,0,0,.4); }
+  .marker-pin { width: 30px; height: 30px; border-radius: 50%; background: #fff; border: 2px solid var(--target);
+                display: flex; align-items: center; justify-content: center; font-size: 16px; line-height: 1;
+                box-shadow: 0 1px 4px rgba(0,0,0,.35); }
+  .marker-pin.off { border-color: var(--muted); opacity: .45; }
+  .popup-name { display: block; max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .leaflet-popup-content { margin: 8px 12px; font-size: 13px; }
+  .living-marker { width: 42px; height: 22px; border-radius: 11px; background: var(--living); color: #fff; border: 2px solid #fff;
+                   display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700;
+                   box-shadow: 0 1px 4px rgba(0,0,0,.4); }
 </style>
 </head>
 <body>
@@ -61,7 +83,7 @@
   <div id="sidebar">
     <header>
       <h1>Residence Optimizer</h1>
-      <p>Rank potential homes by total weekly commute time.</p>
+      <p>Score potential homes by total weekly commute time.</p>
     </header>
     <div id="keywarn" class="warn" style="display:none">
       No routing API key configured. Add <code>ORS_API_KEY</code> to <code>.env</code> and restart.
@@ -106,6 +128,8 @@ function load() {
   try { state = JSON.parse(localStorage.getItem("residence-optimizer") || "") || state; } catch (e) {}
   if (!state.targets) state.targets = [];
   if (!state.living) state.living = [];
+  // Targets saved before the include/exclude toggle existed are counted.
+  state.targets.forEach((t) => { if (t.enabled === undefined) t.enabled = true; });
 }
 function save() { localStorage.setItem("residence-optimizer", JSON.stringify(state)); }
 const uid = () => Math.random().toString(36).slice(2, 9);
@@ -135,7 +159,7 @@ function setPlacing(mode) {
 function addPlace(kind, lat, lng, name) {
   name = name || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
   if (kind === "target") {
-    state.targets.push({ id: uid(), name, lat, lng, mode: "car", trips: 3 });
+    state.targets.push({ id: uid(), name, lat, lng, mode: "car", trips: 3, enabled: true });
   } else {
     state.living.push({ id: uid(), name, lat, lng });
   }
@@ -157,9 +181,14 @@ function renderTargets() {
   el.innerHTML = "";
   state.targets.forEach((t) => {
     const card = document.createElement("div");
-    card.className = "card";
+    card.className = "card" + (t.enabled ? "" : " off");
     card.innerHTML = `
-      <div class="name">${MODES[t.mode].emoji} ${escapeHtml(shortName(t.name))}</div>
+      <div class="name">
+        <label title="Count this target in the commute totals">
+          <input type="checkbox" class="enabled" data-id="${t.id}" ${t.enabled ? "checked" : ""} />
+          <span>${MODES[t.mode].emoji} ${escapeHtml(shortName(t.name))}</span>
+        </label>
+      </div>
       <div class="row">
         <select data-id="${t.id}" class="mode">
           ${Object.entries(MODES).map(([k, v]) => `<option value="${k}" ${k === t.mode ? "selected" : ""}>${v.label}</option>`).join("")}
@@ -175,32 +204,66 @@ function renderTargets() {
 function renderLiving() {
   const el = document.getElementById("living");
   if (!state.living.length) { el.innerHTML = `<div class="empty">No homes yet.</div>`; return; }
-  const rankOf = {};
-  lastResults.forEach((r, i) => { rankOf[r.index] = { rank: i + 1, ...r }; });
+  const resOf = {};
+  lastResults.forEach((r, i) => { resOf[r.index] = { order: i, ...r }; });
   el.innerHTML = "";
-  state.living.forEach((h, idx) => {
-    const res = rankOf[idx];
+  // Best first: shortest weekly commute at the top, then unscored/unreachable.
+  const ordered = state.living
+    .map((h, idx) => ({ h, res: resOf[idx] }))
+    .sort((a, b) => (a.res ? a.res.order : Infinity) - (b.res ? b.res.order : Infinity));
+  ordered.forEach(({ h, res }) => {
     const card = document.createElement("div");
     card.className = "card living-card";
-    let weekly = `<span class="empty">—</span>`, breakdown = "";
+    let weekly = `<span class="empty">—</span>`;
     if (res && res.weekly_minutes != null) {
-      weekly = `<span class="weekly">${fmtDuration(res.weekly_minutes)} <small>/ week</small></span>`;
-      breakdown = `<div class="breakdown">${state.targets.map((t, ti) => {
-        const b = res.breakdown[ti];
-        return `${MODES[t.mode].emoji} ${b && b.one_way_min != null ? fmtDuration(b.one_way_min) + " each way" : "—"}`;
-      }).join(" · ")}</div>`;
+      weekly = `<span class="weekly">${fmtDuration(res.weekly_minutes)} <small>/ week total</small></span>`;
     } else if (res && !res.reachable) {
-      weekly = `<span class="empty">unreachable</span>`;
+      weekly = `<span class="empty">some targets unreachable</span>`;
     }
     card.innerHTML = `
-      <div class="rank">${res ? res.rank : "?"}</div>
+      ${scoreBadge(res && res.score_pct, "score")}
       <div class="living-body">
         <div class="name">${escapeHtml(shortName(h.name))}</div>
-        ${weekly}${breakdown}
+        ${weekly}${res ? renderLegs(res) : ""}
       </div>
       <button class="del" data-id="${h.id}" data-kind="living" title="Remove">✕</button>`;
     el.appendChild(card);
   });
+}
+
+// Score badge: 100% = shortest total commute, 50% = twice as long.
+// Coloured green→red so near-equal homes look near-equal.
+function scoreBadge(pct, cls) {
+  if (pct == null) return `<div class="${cls} na" title="Not computed yet">—</div>`;
+  // 100% green, 60% and below red.
+  const k = Math.max(0, Math.min(1, (pct - 60) / 40));
+  const bg = `hsl(${Math.round(4 + k * 138)}, 62%, ${Math.round(50 - k * 8)}%)`;
+  return `<div class="${cls}" style="background:${bg}" title="Relative to the best home">${pct}%</div>`;
+}
+
+// Per-target detail for one home: one-way time, and the cumulated time
+// (round trip × trips per week) it adds to the weekly total.
+function renderLegs(res) {
+  const rows = state.targets.map((t, ti) => {
+    const b = (res.breakdown || [])[ti];
+    const name = `${MODES[t.mode].emoji} ${escapeHtml(shortName(t.name))}`;
+    const off = t.enabled ? "" : " off";
+    if (!b || b.one_way_min == null) {
+      return `<div class="leg${off}"><div class="leg-top">
+          <span class="leg-name">${name}</span>
+          <span class="leg-total na">${t.enabled ? "no route" : "not counted"}</span>
+        </div></div>`;
+    }
+    return `<div class="leg${off}">
+        <div class="leg-top">
+          <span class="leg-name">${name}</span>
+          <span class="leg-total">${t.enabled ? fmtDuration(b.weekly_min) : "not counted"}</span>
+        </div>
+        <div class="leg-sub">${fmtDuration(b.one_way_min)} one way ·
+          round trip ${fmtDuration(b.round_trip_min)} × ${fmtNum(b.trips)}/week</div>
+      </div>`;
+  }).join("");
+  return `<div class="legs">${rows}</div>`;
 }
 
 function renderMarkers() {
@@ -209,15 +272,22 @@ function renderMarkers() {
   markers = { targets: {}, living: {} };
 
   state.targets.forEach((t) => {
-    const icon = L.divIcon({ className: "", html: `<div class="marker-pin">${MODES[t.mode].emoji}</div>`, iconSize: [24, 24], iconAnchor: [12, 12] });
-    markers.targets[t.id] = L.marker([t.lat, t.lng], { icon }).addTo(map).bindPopup(escapeHtml(shortName(t.name)));
+    const icon = L.divIcon({
+      className: "",
+      html: `<div class="marker-pin${t.enabled ? "" : " off"}">${MODES[t.mode].emoji}</div>`,
+      iconSize: [30, 30], iconAnchor: [15, 15],
+    });
+    markers.targets[t.id] = L.marker([t.lat, t.lng], { icon }).addTo(map).bindPopup(popupHtml(t.name));
   });
-  const rankOf = {};
-  lastResults.forEach((r, i) => { rankOf[r.index] = i + 1; });
+  const scoreOf = {};
+  lastResults.forEach((r) => { scoreOf[r.index] = r.score_pct; });
   state.living.forEach((h, idx) => {
-    const rank = rankOf[idx] || "?";
-    const icon = L.divIcon({ className: "", html: `<div class="living-marker">${rank}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] });
-    markers.living[h.id] = L.marker([h.lat, h.lng], { icon }).addTo(map).bindPopup(escapeHtml(shortName(h.name)));
+    const icon = L.divIcon({
+      className: "",
+      html: scoreBadge(scoreOf[idx], "living-marker"),
+      iconSize: [42, 22], iconAnchor: [21, 11],
+    });
+    markers.living[h.id] = L.marker([h.lat, h.lng], { icon }).addTo(map).bindPopup(popupHtml(h.name));
   });
 }
 
@@ -234,7 +304,9 @@ async function doCompute() {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         living: state.living.map((h) => ({ lat: h.lat, lng: h.lng })),
-        targets: state.targets.map((t) => ({ lat: t.lat, lng: t.lng, mode: t.mode, trips: Number(t.trips) || 0 })),
+        targets: state.targets.map((t) => ({
+          lat: t.lat, lng: t.lng, mode: t.mode, trips: Number(t.trips) || 0, enabled: !!t.enabled,
+        })),
       }),
     });
     if (!r.ok) { console.warn(await r.text()); return; }
@@ -286,6 +358,7 @@ document.getElementById("targets").addEventListener("change", (e) => {
   if (!t) return;
   if (e.target.classList.contains("mode")) t.mode = e.target.value;
   if (e.target.classList.contains("trips")) t.trips = Number(e.target.value) || 0;
+  if (e.target.classList.contains("enabled")) t.enabled = e.target.checked;
   save(); render(); compute();
 });
 document.body.addEventListener("click", (e) => {
@@ -298,7 +371,12 @@ document.body.addEventListener("click", (e) => {
 
 // ---------- Utils ----------
 function shortName(n) { return n.split(",").slice(0, 2).join(",").trim(); }
+// Map popup: one line, ellipsised if too long — full name on hover.
+function popupHtml(name) {
+  return `<span class="popup-name" title="${escapeHtml(name)}">${escapeHtml(shortName(name))}</span>`;
+}
 function escapeHtml(s) { return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+function fmtNum(n) { return String(Number(n)); }
 function fmtDuration(min) {
   min = Math.round(min);
   if (min < 60) return `${min} min`;
