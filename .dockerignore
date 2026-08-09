@@ -1,0 +1,20 @@
+# Keep the build context to what actually goes in the image. .env especially:
+# secrets belong in the deployment's environment, never in a layer.
+.env
+.env.*
+!.env.example
+.git
+.gitignore
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.db
+*.db-wal
+*.db-shm
+node_modules/
+.claude/
+README.md
+compose.yml
+Dockerfile
+.dockerignore

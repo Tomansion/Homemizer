@@ -5,4 +5,11 @@ services:
       - "8000:8000"
     env_file:
       - .env
+    volumes:
+      # The travel-time cache lives here. Losing it means re-buying every
+      # already-known route from OpenRouteService on the next deploy.
+      - cache:/data
     restart: unless-stopped
+
+volumes:
+  cache:

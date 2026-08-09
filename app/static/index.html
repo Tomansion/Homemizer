@@ -4,38 +4,71 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Residence Optimizer</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<meta name="description" content="Find the best place to live: score candidate homes by the total time you would spend commuting each week." />
+<link rel="icon" href="/icon.png" />
+<link rel="apple-touch-icon" href="/icon.png" />
+<meta name="theme-color" content="#6BB5FF" />
+<!-- Leaflet is vendored rather than loaded from a CDN: one less third party
+     that can go down, change, or watch our visitors. -->
+<link rel="stylesheet" href="/vendor/leaflet/leaflet.css" />
 <style>
   :root {
-    --bg: #f6f7f9; --panel: #fff; --border: #e2e5ea; --text: #1c2530;
-    --muted: #6b7686; --accent: #2b6cb0; --target: #e05c4a; --living: #2f8f5b; --cog: #7a51c9;
+    /* Taken from the app icon: a blue house, a green dot, heavy black outline.
+       Green is the "how good is this" colour — it is where the score ramp ends
+       — so homes wear it and targets take the blue, rather than having green
+       mean both "a place you go to" and "the best home". */
+    --blue: #a4d2ff; --green: #19FF6D; --ink: #12161c;
+    --bg: #f4f8fd; --panel: #fff; --border: #dce3ec; --text: var(--ink);
+    --muted: #5d6774; --accent: var(--blue);
+    --target: var(--blue); --living: var(--green); --cog: var(--ink);
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: var(--text); }
   #app { display: flex; height: 100vh; }
-  #sidebar { width: 360px; min-width: 360px; background: var(--panel); border-right: 1px solid var(--border);
+  body { background: var(--bg); }
+  #sidebar { width: 360px; min-width: 360px; background: var(--panel); border-right: 2px solid var(--ink);
              display: flex; flex-direction: column; overflow: hidden; }
   #map { flex: 1; }
-  header { padding: 14px 16px; border-bottom: 1px solid var(--border); }
-  header h1 { margin: 0; font-size: 16px; }
+  header { padding: 14px 16px; border-bottom: 2px solid var(--ink); }
+  header h1 { margin: 0; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+  header h1 img { width: 24px; height: 25px; }
   header p { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
   .scroll { flex: 1; overflow-y: auto; padding: 12px 16px; }
   .section-title { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
                    margin: 18px 0 8px; display: flex; justify-content: space-between; align-items: center; }
-  .search { position: relative; }
-  .search input { width: 100%; padding: 9px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; }
-  .results-dropdown { position: absolute; z-index: 500; left: 0; right: 0; background: #fff; border: 1px solid var(--border);
+  .search { position: relative; display: flex; gap: 8px; }
+  .search input { flex: 1; min-width: 0; padding: 9px 10px; border: 2px solid var(--ink); border-radius: 8px; font-size: 14px; }
+  .search input:focus { outline: 2px solid var(--blue); outline-offset: 1px; }
+  .search button { padding: 9px 12px; border: 2px solid var(--ink); background: var(--blue); border-radius: 8px;
+                   cursor: pointer; font-size: 13px; font-weight: 700; color: var(--ink); }
+  .search button:disabled { opacity: .5; cursor: default; }
+  .results-dropdown { position: absolute; z-index: 500; left: 0; right: 0; background: #fff; border: 2px solid var(--ink);
                       border-radius: 8px; margin-top: 4px; box-shadow: 0 6px 18px rgba(0,0,0,.12); max-height: 240px; overflow-y: auto; }
-  .results-dropdown div { padding: 8px 10px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #f0f1f4; }
-  .results-dropdown div:hover { background: #f3f6fb; }
+  /* A found place is not yet a target or a home: you say which when you pick
+     it, so there is no mode to have set wrongly before you started typing. */
+  .results-dropdown .result { padding: 8px 10px; font-size: 13px; border-bottom: 1px solid #f0f1f4; }
+  .results-dropdown .result:last-child { border-bottom: none; }
+  .result-name { display: block; margin-bottom: 6px; overflow-wrap: anywhere; }
+  .result-actions { display: flex; gap: 6px; }
+  .result-actions button { flex: 1; padding: 5px 6px; border: 2px solid var(--ink); border-radius: 6px;
+                           background: #fff; color: var(--ink); font-size: 11px; font-weight: 700; cursor: pointer;
+                           display: flex; align-items: center; justify-content: center; gap: 5px; }
+  .result-actions .place-icon { width: 13px; height: 14px; }
+  .result-actions button.target:hover { background: var(--target); }
+  .result-actions button.living:hover { background: var(--living); }
   .add-row { display: flex; gap: 8px; margin-top: 10px; }
-  .add-row button { flex: 1; padding: 9px; border: 1px solid var(--border); background: #fff; border-radius: 8px;
-                    cursor: pointer; font-size: 13px; font-weight: 600; }
-  .add-row button.active { color: #fff; border-color: transparent; }
+  .add-row button { flex: 1; padding: 9px; border: 2px solid var(--ink); background: #fff; border-radius: 8px;
+                    cursor: pointer; font-size: 13px; font-weight: 700; color: var(--ink);
+                    display: flex; align-items: center; justify-content: center; gap: 7px; }
+  /* The pin and the house, from /icons/. Same treatment as the transport
+     glyphs: a fixed box, contained, because the two differ in aspect ratio. */
+  .place-icon { width: 15px; height: 16px; object-fit: contain; flex: none; }
+  /* Both fills are bright, so the label stays black rather than going white. */
+  .add-row button.active { box-shadow: inset 0 0 0 2px #fff; }
   .add-row button.target.active { background: var(--target); }
   .add-row button.living.active { background: var(--living); }
   .hint { font-size: 11px; color: var(--muted); margin-top: 6px; min-height: 14px; }
-  .card { border: 1px solid var(--border); border-radius: 10px; padding: 10px; margin-bottom: 8px; }
+  .card { border: 2px solid var(--ink); border-radius: 10px; padding: 10px; margin-bottom: 8px; background: #fff; }
   .card .name { font-size: 13px; font-weight: 600; margin-bottom: 6px; word-break: break-word; }
   .card .name label { display: flex; gap: 6px; align-items: flex-start; cursor: pointer; }
   .card .name input[type=checkbox] { margin: 2px 0 0; cursor: pointer; }
@@ -43,14 +76,23 @@
   .card.off .name, .card.off .row { opacity: .5; }
   .card.off .name input[type=checkbox] { opacity: 1; }
   .card .row { display: flex; gap: 8px; align-items: center; }
-  .card select, .card input { padding: 5px 6px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; }
+  .card select, .card input { padding: 5px 6px; border: 2px solid var(--ink); border-radius: 6px; font-size: 12px; }
   .card input[type=number] { width: 58px; }
   .card .del { margin-left: auto; border: none; background: none; color: var(--muted); cursor: pointer; font-size: 16px; }
-  .living-card { display: flex; gap: 10px; align-items: flex-start; }
-  .score { flex: 0 0 auto; min-width: 44px; padding: 3px 0; border-radius: 11px; color: #fff; text-align: center;
+  /* The score badge only needs to sit beside the name and the weekly total.
+     The per-target detail hangs below at the card's full width, rather than
+     being indented into a narrow column with dead space under the badge. */
+  .living-card { display: block; }
+  .living-head { display: flex; gap: 10px; align-items: flex-start; }
+  .living-head[role=button] { cursor: pointer; }
+  .living-card:not(.open) .legs { display: none; }
+  .score { flex: 0 0 auto; min-width: 46px; padding: 3px 0; border-radius: 11px; border: 2px solid var(--ink);
+           color: var(--ink); text-align: center;
            font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
-  .score.na, .living-marker.na { background: var(--muted); }
-  .living-body { flex: 1; }
+  .score.na, .living-marker.na { background: #e6eaf0; color: var(--muted); }
+  /* min-width:0 or the body refuses to shrink below its min-content width and
+     shoves the remove button out past the card's right edge. */
+  .living-body { flex: 1; min-width: 0; }
   .weekly { font-size: 15px; font-weight: 700; }
   .weekly small { font-weight: 400; color: var(--muted); font-size: 11px; }
   .breakdown { font-size: 11px; color: var(--muted); margin-top: 4px; }
@@ -58,63 +100,101 @@
   .leg { padding: 4px 0; border-bottom: 1px dashed #eef0f3; }
   .leg:last-child { border-bottom: none; }
   .leg-top { display: flex; align-items: baseline; gap: 8px; font-size: 12px; }
-  .leg-name { width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .leg-total { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  /* Flexible, not a fixed width: the score badge indents the body, and a fixed
+     column pushed the time out past the card's edge. */
+  .leg-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .leg-total { margin-left: auto; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .leg-total.na { font-weight: 400; color: var(--muted); font-style: italic; }
   .leg.off .leg-name, .leg.off .leg-sub { opacity: .55; }
   .leg.off .leg-total { font-weight: 400; color: var(--muted); font-style: italic; }
-  .leg-sub { font-size: 11px; color: var(--muted); margin-top: 1px; font-variant-numeric: tabular-nums; }
+  .leg-sub { font-size: 11px; color: var(--muted); margin-top: 1px; font-variant-numeric: tabular-nums;
+             overflow-wrap: anywhere; }
   .empty { font-size: 12px; color: var(--muted); font-style: italic; }
-  .warn { background: #fff6e5; border: 1px solid #f0d9a8; color: #8a5a00; padding: 8px 10px; border-radius: 8px;
+  .warn { background: #fff6e5; border: 2px solid var(--ink); color: #7a4f00; padding: 8px 10px; border-radius: 8px;
           font-size: 12px; margin: 12px 16px; }
-  .marker-pin { width: 30px; height: 30px; border-radius: 50%; background: #fff; border: 2px solid var(--target);
-                display: flex; align-items: center; justify-content: center; font-size: 16px; line-height: 1;
+  /* Failures used to go to the console only, which left a visitor staring at an
+     app that had quietly stopped working. Say what happened, in the sidebar. */
+  .err { background: #ffe3e0; border: 2px solid var(--ink); color: #8a1f16; padding: 8px 10px; border-radius: 8px;
+         font-size: 12px; margin: 12px 0 0; }
+  /* Transport icons (/icons/*.svg). Their source aspect ratios differ — 60×40
+     for the bike, 36×50 for the train — so they get a fixed box and are
+     contained inside it rather than sized by one dimension. */
+  .mode-icon { width: 18px; height: 14px; object-fit: contain; vertical-align: -2px; flex: none; }
+  .leg-name .mode-icon { width: 15px; height: 12px; vertical-align: -1px; }
+  .marker-pin .mode-icon { width: 18px; height: 16px; vertical-align: 0; }
+  .marker-pin { width: 30px; height: 30px; border-radius: 50%; background: var(--target); border: 3px solid var(--ink);
+                display: flex; align-items: center; justify-content: center; line-height: 1;
                 box-shadow: 0 1px 4px rgba(0,0,0,.35); }
-  .marker-pin.off { border-color: var(--muted); opacity: .45; }
+  .marker-pin.off { background: #e6eaf0; opacity: .55; }
   .leaflet-popup-content { margin: 10px 12px; font-size: 13px; }
+  /* Match the outlined look of the cards and markers. */
+  .leaflet-popup-content-wrapper { border: 2px solid var(--ink); border-radius: 10px; }
+  .leaflet-popup-tip { border: 2px solid var(--ink); }
   /* The popup is already a framed box: let the card inside it go borderless. */
   .card-popup .card { border: none; border-radius: 0; padding: 0; margin: 0; }
   .card-popup .card .name { padding-right: 16px; }  /* clear of the popup close button */
-  .card-popup .leg-name { width: 150px; }
-  /* Keep the home's remove button on its own line, far from the ✕ that closes
-     the popup, and spell it out so the two can't be confused. */
-  .card-popup .living-card { flex-wrap: wrap; }
-  .card-popup .living-card .del { flex: 0 0 100%; margin: 8px 0 0; text-align: right;
-                                  font-size: 11px; font-weight: 600; color: #b3261e; }
-  .card-popup .living-card .del::after { content: " Remove"; }
-  .living-marker { width: 42px; height: 22px; border-radius: 11px; background: var(--living); color: #fff; border: 2px solid #fff;
+  /* Keep the remove button on its own line, far from the ✕ that closes the
+     popup, and spell it out so the two can't be confused. Targets need this as
+     much as homes do — a bare ✕ next to the popup's own ✕ is a trap. */
+  .card-popup .living-head, .card-popup .card .row { flex-wrap: wrap; }
+  .card-popup .del { flex: 0 0 100%; margin: 8px 0 0; text-align: right;
+                     font-size: 11px; font-weight: 600; color: #b3261e; }
+  .card-popup .del::after { content: " Remove"; }
+  .living-marker { width: 44px; height: 24px; border-radius: 12px; background: var(--living); color: var(--ink);
+                   border: 3px solid var(--ink);
                    display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700;
                    box-shadow: 0 1px 4px rgba(0,0,0,.4); transition: transform .12s ease, box-shadow .12s ease; }
-  /* Hovering a home in the sidebar makes its marker pop out of the map. */
-  #living .card:hover { border-color: var(--living); }
+  /* Hovering a home in the sidebar makes its marker pop out of the map. The
+     card is already black-bordered, so it tints instead of changing colour. */
+  #living .card:hover { background: rgba(25,255,109,.16); }
   .leaflet-marker-icon.highlight { z-index: 1000 !important; }
   .highlight .living-marker { transform: scale(1.3);
-                              box-shadow: 0 0 0 5px rgba(47,143,91,.3), 0 2px 8px rgba(0,0,0,.45); }
-  .cog-marker { width: 26px; height: 26px; border-radius: 50%; background: #fff; border: 2px dashed var(--cog);
+                              box-shadow: 0 0 0 5px rgba(25,255,109,.45), 0 2px 8px rgba(0,0,0,.45); }
+  .cog-marker { width: 26px; height: 26px; border-radius: 50%; background: #fff; border: 3px dashed var(--cog);
                 color: var(--cog); display: flex; align-items: center; justify-content: center;
-                font-size: 15px; line-height: 1; box-shadow: 0 1px 4px rgba(0,0,0,.3); }
+                font-size: 14px; line-height: 1; box-shadow: 0 1px 4px rgba(0,0,0,.3); }
+
+  /* Phones. The 360px sidebar sitting next to a 100vh map is a desktop layout,
+     and a link shared with someone is mostly opened on a phone — so stack the
+     map above the list instead. dvh, because mobile browser chrome eats vh. */
+  @media (max-width: 760px) {
+    #app { flex-direction: column; height: 100vh; height: 100dvh; }
+    #map { order: -1; flex: none; height: 45vh; height: 45dvh; min-height: 200px; }
+    #sidebar { width: auto; min-width: 0; flex: 1; min-height: 0;
+               border-right: none; border-top: 2px solid var(--ink); }
+    header { padding: 10px 14px; }
+    header p { display: none; }
+    .scroll { padding: 10px 14px; }
+    /* 16px or iOS zooms the whole page in when the field takes focus. */
+    .search input { font-size: 16px; }
+    .leg-name { width: auto; flex: 1; }
+  }
 </style>
 </head>
 <body>
 <div id="app">
   <div id="sidebar">
     <header>
-      <h1>Residence Optimizer</h1>
+      <h1><img src="/icon.png" alt="" width="24" height="25" />Residence Optimizer</h1>
       <p>Score potential homes by total weekly commute time.</p>
     </header>
     <div id="keywarn" class="warn" style="display:none">
       No routing API key configured. Add <code>ORS_API_KEY</code> to <code>.env</code> and restart.
     </div>
     <div class="scroll">
-      <div class="search">
-        <input id="search" placeholder="Search a place to add…" autocomplete="off" />
+      <!-- Submit-only search: OpenStreetMap's geocoder forbids auto-complete,
+           so nothing is sent until you press Enter or the button. -->
+      <form class="search" id="searchForm" autocomplete="off">
+        <input id="search" placeholder="Search a place…" autocomplete="off" aria-label="Search a place" />
+        <button type="submit" id="searchBtn">Search</button>
         <div id="searchResults" class="results-dropdown" style="display:none"></div>
-      </div>
+      </form>
+      <div id="error" class="err" style="display:none"></div>
       <div class="add-row">
-        <button id="addTargetBtn" class="target">📍 Add target</button>
-        <button id="addLivingBtn" class="living">🏠 Add home</button>
+        <button id="addTargetBtn" class="target"><img class="place-icon" src="/icons/target.svg" alt="" />Add target</button>
+        <button id="addLivingBtn" class="living"><img class="place-icon" src="/icons/home.svg" alt="" />Add home</button>
       </div>
-      <div class="hint" id="hint">Add from the map or the search — click a marker to change it.</div>
+      <div class="hint" id="hint">Search a place above, or use these to drop one on the map.</div>
 
       <div class="section-title">Target places <span id="tcount"></span></div>
       <div id="targets"></div>
@@ -126,25 +206,36 @@
   <div id="map"></div>
 </div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="/vendor/leaflet/leaflet.js"></script>
 <script>
 const MODES = {
-  car:     { emoji: "🚗", label: "Car" },
-  bike:    { emoji: "🚲", label: "Bike" },
-  foot:    { emoji: "🚶", label: "Foot" },
-  transit: { emoji: "🚌", label: "Transit" },
+  car:     { icon: "/icons/car.svg",   label: "Car" },
+  bike:    { icon: "/icons/bike.svg",  label: "Bike" },
+  foot:    { icon: "/icons/walk.svg",  label: "Foot" },
+  transit: { icon: "/icons/train.svg", label: "Transit" },
 };
+
+// Drawn icons rather than emoji: emoji render differently on every platform,
+// and these match the app's flat black line work. The label doubles as alt
+// text — in a leg row the icon is the only thing naming the mode.
+function modeIcon(mode) {
+  const m = MODES[mode];
+  return `<img class="mode-icon" src="${m.icon}" alt="${m.label}" title="${m.label}" />`;
+}
 
 // Rough door-to-door speeds (km/h), only used to weight the centre of gravity:
 // a slower mode costs more time per km, so it pulls the centre harder.
 // transit is overwritten at startup with the server's TRANSIT_SPEED_KMH.
 const MODE_SPEED_KMH = { car: 50, bike: 15, foot: 5, transit: 20 };
 
+// How many places one comparison may hold. The server enforces the real caps
+// and tells us its numbers at startup; these are just the sane defaults.
+let LIMITS = { targets: 25, living: 25 };
+
 let state = { targets: [], living: [] };
 let placing = null;               // "target" | "living" | null
 let lastResults = [];             // ranking from server, keyed by living index
 let markers = { targets: {}, living: {}, cog: null, cogLines: [] };
-let searchInsertMode = "target";  // what a search pick becomes
 
 function load() {
   try { state = JSON.parse(localStorage.getItem("residence-optimizer") || "") || state; } catch (e) {}
@@ -158,8 +249,13 @@ const uid = () => Math.random().toString(36).slice(2, 9);
 
 // ---------- Map ----------
 const map = L.map("map").setView([48.8566, 2.3522], 12);
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-  attribution: "&copy; OpenStreetMap contributors", maxZoom: 19,
+// The {s} subdomain form is deprecated; the single host is what OSM's tile
+// policy asks for now. Attribution has to be a link to satisfy the ODbL.
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  attribution:
+    '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' +
+    ' &middot; routing by <a href="https://openrouteservice.org">OpenRouteService</a>',
+  maxZoom: 19,
 }).addTo(map);
 
 map.on("click", (e) => {
@@ -175,10 +271,16 @@ function setPlacing(mode) {
   document.getElementById("map").style.cursor = mode ? "crosshair" : "";
   document.getElementById("hint").textContent = mode
     ? `Click on the map to place a ${mode === "target" ? "target" : "home"}.`
-    : "Add from the map or the search — click a marker to change it.";
+    : "Search a place above, or use these to drop one on the map.";
 }
 
 function addPlace(kind, lat, lng, name) {
+  const list = kind === "target" ? state.targets : state.living;
+  const cap = kind === "target" ? LIMITS.targets : LIMITS.living;
+  if (list.length >= cap) {
+    showError(`Up to ${cap} ${kind === "target" ? "targets" : "homes"} at a time — remove one first.`);
+    return false;
+  }
   name = name || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
   if (kind === "target") {
     state.targets.push({ id: uid(), name, lat, lng, mode: "car", trips: 3, enabled: true });
@@ -186,6 +288,7 @@ function addPlace(kind, lat, lng, name) {
     state.living.push({ id: uid(), name, lat, lng });
   }
   save(); render(); compute();
+  return true;
 }
 
 // ---------- Rendering ----------
@@ -207,7 +310,7 @@ function targetCard(t) {
     <div class="name">
       <label title="Count this target in the commute totals">
         <input type="checkbox" class="enabled" data-id="${t.id}" ${t.enabled ? "checked" : ""} />
-        <span>${MODES[t.mode].emoji} ${escapeHtml(shortName(t.name))}</span>
+        <span>${modeIcon(t.mode)} ${escapeHtml(shortName(t.name))}</span>
       </label>
     </div>
     <div class="row">
@@ -223,7 +326,12 @@ function targetCard(t) {
 
 function livingCard(h, res) {
   const card = document.createElement("div");
-  card.className = "card living-card";
+  // The per-target breakdown is long and repeats itself down a list of twenty
+  // homes, so it starts folded away: the score, the name and the weekly total
+  // are what you scan by, and the detail is one click off.
+  const detail = res ? renderLegs(res) : "";
+  const open = !!detail && expandedHomes.has(h.id);
+  card.className = "card living-card" + (open ? " open" : "");
   card.dataset.id = h.id;  // lets the sidebar tie a hovered card to its marker
   let weekly = `<span class="empty">—</span>`;
   if (res && res.weekly_minutes != null) {
@@ -231,15 +339,37 @@ function livingCard(h, res) {
   } else if (res && !res.reachable) {
     weekly = `<span class="empty">some targets unreachable</span>`;
   }
+  const fold = detail
+    ? ` role="button" tabindex="0" aria-expanded="${open}" title="Time spent on each target"`
+    : "";
   card.innerHTML = `
-    ${scoreBadge(res && res.score_pct, "score")}
-    <div class="living-body">
-      <div class="name">${escapeHtml(shortName(h.name))}</div>
-      ${weekly}${res ? renderLegs(res) : ""}
+    <div class="living-head"${fold}>
+      ${scoreBadge(res && res.score_pct, "score")}
+      <div class="living-body">
+        <div class="name">${escapeHtml(shortName(h.name))}</div>
+        ${weekly}
+      </div>
+      <button class="del" data-id="${h.id}" data-kind="living" title="Remove">✕</button>
     </div>
-    <button class="del" data-id="${h.id}" data-kind="living" title="Remove">✕</button>`;
+    ${detail}`;
   return card;
 }
+
+// Which homes are unfolded. Kept outside `state` because it is a view detail,
+// not something worth saving — but outside the DOM too, so a re-render (a new
+// result, an edited target) does not snap everything shut again.
+const expandedHomes = new Set();
+
+function setFold(id, open) {
+  if (open) expandedHomes.add(id); else expandedHomes.delete(id);
+  // The same card can be on screen twice — in the list and in a map popup.
+  document.querySelectorAll(`.living-card[data-id="${id}"]`).forEach((card) => {
+    card.classList.toggle("open", open);
+    const head = card.querySelector(".living-head[role=button]");
+    if (head) head.setAttribute("aria-expanded", String(open));
+  });
+}
+function toggleHome(id) { setFold(id, !expandedHomes.has(id)); }
 
 // Server result for a home, by its position in state.living (null until computed).
 function resultOf(idx) { return lastResults.find((r) => r.index === idx) || null; }
@@ -271,10 +401,16 @@ function renderLiving() {
 // Coloured green→red so near-equal homes look near-equal.
 function scoreBadge(pct, cls) {
   if (pct == null) return `<div class="${cls} na" title="Not computed yet">—</div>`;
-  // 100% green, 60% and below red.
+  // 60% and below is red, and the top of the ramp lands exactly on the icon's
+  // green (#19FF6D = hsl(142,100%,55%)) so the best home matches the branding.
   const k = Math.max(0, Math.min(1, (pct - 60) / 40));
-  const bg = `hsl(${Math.round(4 + k * 138)}, 62%, ${Math.round(50 - k * 8)}%)`;
-  return `<div class="${cls}" style="background:${bg}" title="Relative to the best home">${pct}%</div>`;
+  const bg = `hsl(${Math.round(4 + k * 138)}, ${Math.round(66 + k * 34)}%, ${Math.round(50 + k * 5)}%)`;
+  // Black on the red end is hard to read, so the badge flips to white there.
+  // The red is deepened to 50% lightness to give that white something to sit
+  // on; by 70% the ramp has warmed up enough for black to be the clearer of
+  // the two again.
+  const fg = pct < 70 ? "#fff" : "var(--ink)";
+  return `<div class="${cls}" style="background:${bg};color:${fg}" title="Relative to the best home">${pct}%</div>`;
 }
 
 // Per-target detail for one home: one-way time, and the cumulated time
@@ -282,7 +418,7 @@ function scoreBadge(pct, cls) {
 function renderLegs(res) {
   const rows = state.targets.map((t, ti) => {
     const b = (res.breakdown || [])[ti];
-    const name = `${MODES[t.mode].emoji} ${escapeHtml(shortName(t.name))}`;
+    const name = `${modeIcon(t.mode)} ${escapeHtml(shortName(t.name))}`;
     const off = t.enabled ? "" : " off";
     if (!b || b.one_way_min == null) {
       return `<div class="leg${off}"><div class="leg-top">
@@ -336,7 +472,7 @@ function renderMarkers() {
   state.targets.forEach((t) => {
     const icon = L.divIcon({
       className: "",
-      html: `<div class="marker-pin${t.enabled ? "" : " off"}">${MODES[t.mode].emoji}</div>`,
+      html: `<div class="marker-pin${t.enabled ? "" : " off"}">${modeIcon(t.mode)}</div>`,
       iconSize: [30, 30], iconAnchor: [15, 15],
     });
     markers.targets[t.id] = L.marker([t.lat, t.lng], { icon }).addTo(map)
@@ -349,7 +485,10 @@ function renderMarkers() {
       iconSize: [42, 22], iconAnchor: [21, 11],
     });
     markers.living[h.id] = L.marker([h.lat, h.lng], { icon }).addTo(map)
-      .bindPopup(() => livingCard(h, resultOf(idx)), CARD_POPUP);
+      // Clicking a home on the map means you want that home's numbers, so its
+      // popup comes up unfolded — and the list copy follows, since the two are
+      // one card. Folding it back from either place still works.
+      .bindPopup(() => { setFold(h.id, true); return livingCard(h, resultOf(idx)); }, CARD_POPUP);
   });
 
   open.forEach(({ kind, id }) => {
@@ -362,7 +501,8 @@ function renderMarkers() {
     state.targets.forEach((t) => {
       if (!t.enabled || !(Number(t.trips) > 0)) return;
       markers.cogLines.push(L.polyline([[cog.lat, cog.lng], [t.lat, t.lng]], {
-        color: "#7a51c9", weight: 2,  // = --cog (SVG stroke, so no CSS var) opacity: .75, dashArray: "3 6", interactive: false,
+        // --cog spelled out: this is an SVG stroke, so no CSS variable.
+        color: "#12161c", weight: 2, opacity: .75, dashArray: "3 6", interactive: false,
       }).addTo(map));
     });
     const icon = L.divIcon({
@@ -394,48 +534,87 @@ async function doCompute() {
         })),
       }),
     });
-    if (!r.ok) { console.warn(await r.text()); return; }
+    if (!r.ok) {
+      // Rate limits, an exhausted daily allowance, a routing outage: whatever
+      // it is, the last thing to do is fail silently and look broken.
+      showError(await errorText(r, "Could not compute travel times."));
+      return;
+    }
+    clearError();
     lastResults = (await r.json()).results || [];
     renderLiving(); renderMarkers();
-  } catch (e) { console.warn(e); }
+  } catch (e) {
+    showError("Could not reach the server. Check your connection.");
+  }
 }
 
 // ---------- Search / geocode ----------
 const searchInput = document.getElementById("search");
 const searchResults = document.getElementById("searchResults");
-let searchTimer = null;
-searchInput.addEventListener("input", () => {
-  clearTimeout(searchTimer);
+const searchBtn = document.getElementById("searchBtn");
+
+// Geocoding runs on submit only — never per keystroke. OpenStreetMap's
+// Nominatim is free and shared, and its usage policy rules out using it for
+// auto-complete; a debounce would not have made that any less true.
+document.getElementById("searchForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
   const q = searchInput.value.trim();
-  if (q.length < 3) { searchResults.style.display = "none"; return; }
-  searchTimer = setTimeout(async () => {
+  if (q.length < 3) return;
+  searchBtn.disabled = true;
+  searchBtn.textContent = "…";
+  try {
     const r = await fetch("/api/geocode", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query: q }),
     });
+    if (!r.ok) { showError(await errorText(r, "The place search failed.")); return; }
+    clearError();
     const items = await r.json();
-    if (!items.length) { searchResults.style.display = "none"; return; }
+    if (!items.length) { searchResults.style.display = "none"; showError(`No place found for “${q}”.`); return; }
     searchResults.innerHTML = "";
     items.forEach((it) => {
-      const d = document.createElement("div");
-      d.textContent = it.name;
-      d.onclick = () => {
-        addPlace(searchInsertMode, it.lat, it.lng, it.name);
-        map.setView([it.lat, it.lng], 13);
-        searchInput.value = ""; searchResults.style.display = "none";
-      };
-      searchResults.appendChild(d);
+      const row = document.createElement("div");
+      row.className = "result";
+      // type="button", or these would submit the search form they sit in.
+      row.innerHTML = `<span class="result-name"></span>
+        <span class="result-actions">
+          <button type="button" class="target"><img class="place-icon" src="/icons/target.svg" alt="" />Target</button>
+          <button type="button" class="living"><img class="place-icon" src="/icons/home.svg" alt="" />Home</button>
+        </span>`;
+      row.querySelector(".result-name").textContent = it.name;
+      row.querySelectorAll("button").forEach((b) => {
+        b.onclick = () => takeResult(b.className, it);
+      });
+      searchResults.appendChild(row);
     });
     searchResults.style.display = "block";
-  }, 350);
+  } catch (err) {
+    showError("The place search is unreachable. Check your connection.");
+  } finally {
+    searchBtn.disabled = false;
+    searchBtn.textContent = "Search";
+  }
 });
 document.addEventListener("click", (e) => {
   if (!e.target.closest(".search")) searchResults.style.display = "none";
 });
 
+// Taking a search result is a second, complete way to add a place, so it also
+// disarms the map: leaving the crosshair on used to plant an unwanted marker
+// on whatever the next click landed on.
+function takeResult(kind, it) {
+  if (!addPlace(kind, it.lat, it.lng, it.name)) return;
+  map.setView([it.lat, it.lng], 13);
+  setPlacing(null);
+  searchInput.value = "";
+  searchResults.style.display = "none";
+}
+
 // ---------- Events ----------
-document.getElementById("addTargetBtn").onclick = () => { searchInsertMode = "target"; setPlacing(placing === "target" ? null : "target"); };
-document.getElementById("addLivingBtn").onclick = () => { searchInsertMode = "living"; setPlacing(placing === "living" ? null : "living"); };
+// These arm the map only. What a searched place becomes is chosen on the
+// result itself, so there is no hidden "current type" to get wrong.
+document.getElementById("addTargetBtn").onclick = () => setPlacing(placing === "target" ? null : "target");
+document.getElementById("addLivingBtn").onclick = () => setPlacing(placing === "living" ? null : "living");
 
 // Hovering a home card in the sidebar highlights its marker on the map.
 // Bound to the list only, so the same card shown inside a popup stays inert.
@@ -465,8 +644,38 @@ document.body.addEventListener("click", (e) => {
   const { id, kind } = e.target.dataset;
   state[kind === "target" ? "targets" : "living"] =
     state[kind === "target" ? "targets" : "living"].filter((x) => x.id !== id);
+  expandedHomes.delete(id);
   save(); render(); compute();
 });
+
+// Folding a home open/shut. Delegated on <body> like everything else, so it
+// works from a map popup as well as from the list; the remove button sits
+// inside the same header and must not count as a click on it.
+document.body.addEventListener("click", (e) => {
+  const head = e.target.closest(".living-head[role=button]");
+  if (!head || e.target.closest(".del")) return;
+  toggleHome(head.closest(".living-card").dataset.id);
+});
+document.body.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const head = e.target.closest(".living-head[role=button]");
+  if (!head) return;
+  e.preventDefault();  // Space would scroll the list
+  toggleHome(head.closest(".living-card").dataset.id);
+});
+
+// ---------- Errors ----------
+const errorBox = document.getElementById("error");
+function showError(msg) { errorBox.textContent = msg; errorBox.style.display = "block"; }
+function clearError() { errorBox.style.display = "none"; }
+// The API explains itself in `detail`; fall back to something human otherwise.
+async function errorText(r, fallback) {
+  try {
+    const body = await r.json();
+    if (typeof body.detail === "string") return body.detail;
+  } catch (e) {}
+  return fallback;
+}
 
 // ---------- Utils ----------
 function shortName(n) { return n.split(",").slice(0, 2).join(",").trim(); }
@@ -479,6 +688,22 @@ function fmtDuration(min) {
   return m ? `${h}h${String(m).padStart(2, "0")}` : `${h}h`;
 }
 
+// ---------- Analytics ----------
+// Umami is cookieless: it writes nothing to the visitor's device and collects
+// no personal data, which is exactly why this app shows no cookie banner —
+// there is no consent to ask for. Loaded only where one is configured, so a
+// local or self-hosted copy reports nothing to anyone.
+function loadAnalytics(cfg) {
+  if (!cfg.umami_src || !cfg.umami_website_id) return;
+  const s = document.createElement("script");
+  s.src = cfg.umami_src;
+  s.defer = true;
+  s.setAttribute("data-website-id", cfg.umami_website_id);
+  s.setAttribute("data-do-not-track", "true");  // respect the browser's DNT
+  if (cfg.umami_domains) s.setAttribute("data-domains", cfg.umami_domains);
+  document.head.appendChild(s);
+}
+
 // ---------- Init ----------
 (async function init() {
   load();
@@ -486,6 +711,9 @@ function fmtDuration(min) {
     const cfg = await (await fetch("/api/config")).json();
     if (!cfg.has_key) document.getElementById("keywarn").style.display = "block";
     if (cfg.transit_speed_kmh > 0) MODE_SPEED_KMH.transit = cfg.transit_speed_kmh;
+    if (cfg.max_targets > 0) LIMITS.targets = cfg.max_targets;
+    if (cfg.max_living > 0) LIMITS.living = cfg.max_living;
+    loadAnalytics(cfg);
   } catch (e) {}
   render();
   if (state.living.length || state.targets.length) {
