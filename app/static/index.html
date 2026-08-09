@@ -8,7 +8,7 @@
 <style>
   :root {
     --bg: #f6f7f9; --panel: #fff; --border: #e2e5ea; --text: #1c2530;
-    --muted: #6b7686; --accent: #2b6cb0; --target: #e05c4a; --living: #2f8f5b;
+    --muted: #6b7686; --accent: #2b6cb0; --target: #e05c4a; --living: #2f8f5b; --cog: #7a51c9;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: var(--text); }
@@ -58,7 +58,7 @@
   .leg { padding: 4px 0; border-bottom: 1px dashed #eef0f3; }
   .leg:last-child { border-bottom: none; }
   .leg-top { display: flex; align-items: baseline; gap: 8px; font-size: 12px; }
-  .leg-name { width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .leg-name { width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .leg-total { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .leg-total.na { font-weight: 400; color: var(--muted); font-style: italic; }
   .leg.off .leg-name, .leg.off .leg-sub { opacity: .55; }
@@ -71,11 +71,23 @@
                 display: flex; align-items: center; justify-content: center; font-size: 16px; line-height: 1;
                 box-shadow: 0 1px 4px rgba(0,0,0,.35); }
   .marker-pin.off { border-color: var(--muted); opacity: .45; }
-  .popup-name { display: block; max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .leaflet-popup-content { margin: 8px 12px; font-size: 13px; }
+  .leaflet-popup-content { margin: 10px 12px; font-size: 13px; }
+  /* The popup is already a framed box: let the card inside it go borderless. */
+  .card-popup .card { border: none; border-radius: 0; padding: 0; margin: 0; }
+  .card-popup .card .name { padding-right: 16px; }  /* clear of the popup close button */
+  .card-popup .leg-name { width: 150px; }
+  /* Keep the home's remove button on its own line, far from the ✕ that closes
+     the popup, and spell it out so the two can't be confused. */
+  .card-popup .living-card { flex-wrap: wrap; }
+  .card-popup .living-card .del { flex: 0 0 100%; margin: 8px 0 0; text-align: right;
+                                  font-size: 11px; font-weight: 600; color: #b3261e; }
+  .card-popup .living-card .del::after { content: " Remove"; }
   .living-marker { width: 42px; height: 22px; border-radius: 11px; background: var(--living); color: #fff; border: 2px solid #fff;
                    display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700;
                    box-shadow: 0 1px 4px rgba(0,0,0,.4); }
+  .cog-marker { width: 26px; height: 26px; border-radius: 50%; background: #fff; border: 2px dashed var(--cog);
+                color: var(--cog); display: flex; align-items: center; justify-content: center;
+                font-size: 15px; line-height: 1; box-shadow: 0 1px 4px rgba(0,0,0,.3); }
 </style>
 </head>
 <body>
@@ -97,7 +109,7 @@
         <button id="addTargetBtn" class="target">📍 Add target</button>
         <button id="addLivingBtn" class="living">🏠 Add home</button>
       </div>
-      <div class="hint" id="hint">Pick a mode, then click the map — or use search above.</div>
+      <div class="hint" id="hint">Add from the map or the search — click a marker to change it.</div>
 
       <div class="section-title">Target places <span id="tcount"></span></div>
       <div id="targets"></div>
@@ -118,10 +130,15 @@ const MODES = {
   transit: { emoji: "🚌", label: "Transit" },
 };
 
+// Rough door-to-door speeds (km/h), only used to weight the centre of gravity:
+// a slower mode costs more time per km, so it pulls the centre harder.
+// transit is overwritten at startup with the server's TRANSIT_SPEED_KMH.
+const MODE_SPEED_KMH = { car: 50, bike: 15, foot: 5, transit: 20 };
+
 let state = { targets: [], living: [] };
 let placing = null;               // "target" | "living" | null
 let lastResults = [];             // ranking from server, keyed by living index
-let markers = { targets: {}, living: {} };
+let markers = { targets: {}, living: {}, cog: null, cogLines: [] };
 let searchInsertMode = "target";  // what a search pick becomes
 
 function load() {
@@ -153,7 +170,7 @@ function setPlacing(mode) {
   document.getElementById("map").style.cursor = mode ? "crosshair" : "";
   document.getElementById("hint").textContent = mode
     ? `Click on the map to place a ${mode === "target" ? "target" : "home"}.`
-    : "Pick a mode, then click the map — or use search above.";
+    : "Add from the map or the search — click a marker to change it.";
 }
 
 function addPlace(kind, lat, lng, name) {
@@ -175,60 +192,73 @@ function render() {
   document.getElementById("lcount").textContent = state.living.length || "";
 }
 
+// Cards are built once and used in two places: the sidebar lists and the map
+// popups. Their controls are wired through delegated listeners on <body>, so a
+// card behaves identically wherever it is shown.
+function targetCard(t) {
+  const card = document.createElement("div");
+  card.className = "card" + (t.enabled ? "" : " off");
+  card.innerHTML = `
+    <div class="name">
+      <label title="Count this target in the commute totals">
+        <input type="checkbox" class="enabled" data-id="${t.id}" ${t.enabled ? "checked" : ""} />
+        <span>${MODES[t.mode].emoji} ${escapeHtml(shortName(t.name))}</span>
+      </label>
+    </div>
+    <div class="row">
+      <select data-id="${t.id}" class="mode">
+        ${Object.entries(MODES).map(([k, v]) => `<option value="${k}" ${k === t.mode ? "selected" : ""}>${v.label}</option>`).join("")}
+      </select>
+      <input type="number" min="0" step="1" value="${t.trips}" data-id="${t.id}" class="trips" title="round trips / week" />
+      <span style="font-size:11px;color:var(--muted)">×/week</span>
+      <button class="del" data-id="${t.id}" data-kind="target" title="Remove">✕</button>
+    </div>`;
+  return card;
+}
+
+function livingCard(h, res) {
+  const card = document.createElement("div");
+  card.className = "card living-card";
+  let weekly = `<span class="empty">—</span>`;
+  if (res && res.weekly_minutes != null) {
+    weekly = `<span class="weekly">${fmtDuration(res.weekly_minutes)} <small>/ week total</small></span>`;
+  } else if (res && !res.reachable) {
+    weekly = `<span class="empty">some targets unreachable</span>`;
+  }
+  card.innerHTML = `
+    ${scoreBadge(res && res.score_pct, "score")}
+    <div class="living-body">
+      <div class="name">${escapeHtml(shortName(h.name))}</div>
+      ${weekly}${res ? renderLegs(res) : ""}
+    </div>
+    <button class="del" data-id="${h.id}" data-kind="living" title="Remove">✕</button>`;
+  return card;
+}
+
+// Server result for a home, by its position in state.living (null until computed).
+function resultOf(idx) { return lastResults.find((r) => r.index === idx) || null; }
+// Rank of a home in the results, i.e. where it sits in the best-first order.
+function orderOf(idx) {
+  const i = lastResults.findIndex((r) => r.index === idx);
+  return i < 0 ? Infinity : i;
+}
+
 function renderTargets() {
   const el = document.getElementById("targets");
   if (!state.targets.length) { el.innerHTML = `<div class="empty">No targets yet.</div>`; return; }
   el.innerHTML = "";
-  state.targets.forEach((t) => {
-    const card = document.createElement("div");
-    card.className = "card" + (t.enabled ? "" : " off");
-    card.innerHTML = `
-      <div class="name">
-        <label title="Count this target in the commute totals">
-          <input type="checkbox" class="enabled" data-id="${t.id}" ${t.enabled ? "checked" : ""} />
-          <span>${MODES[t.mode].emoji} ${escapeHtml(shortName(t.name))}</span>
-        </label>
-      </div>
-      <div class="row">
-        <select data-id="${t.id}" class="mode">
-          ${Object.entries(MODES).map(([k, v]) => `<option value="${k}" ${k === t.mode ? "selected" : ""}>${v.label}</option>`).join("")}
-        </select>
-        <input type="number" min="0" step="1" value="${t.trips}" data-id="${t.id}" class="trips" title="round trips / week" />
-        <span style="font-size:11px;color:var(--muted)">×/week</span>
-        <button class="del" data-id="${t.id}" data-kind="target" title="Remove">✕</button>
-      </div>`;
-    el.appendChild(card);
-  });
+  state.targets.forEach((t) => el.appendChild(targetCard(t)));
 }
 
 function renderLiving() {
   const el = document.getElementById("living");
   if (!state.living.length) { el.innerHTML = `<div class="empty">No homes yet.</div>`; return; }
-  const resOf = {};
-  lastResults.forEach((r, i) => { resOf[r.index] = { order: i, ...r }; });
   el.innerHTML = "";
   // Best first: shortest weekly commute at the top, then unscored/unreachable.
-  const ordered = state.living
-    .map((h, idx) => ({ h, res: resOf[idx] }))
-    .sort((a, b) => (a.res ? a.res.order : Infinity) - (b.res ? b.res.order : Infinity));
-  ordered.forEach(({ h, res }) => {
-    const card = document.createElement("div");
-    card.className = "card living-card";
-    let weekly = `<span class="empty">—</span>`;
-    if (res && res.weekly_minutes != null) {
-      weekly = `<span class="weekly">${fmtDuration(res.weekly_minutes)} <small>/ week total</small></span>`;
-    } else if (res && !res.reachable) {
-      weekly = `<span class="empty">some targets unreachable</span>`;
-    }
-    card.innerHTML = `
-      ${scoreBadge(res && res.score_pct, "score")}
-      <div class="living-body">
-        <div class="name">${escapeHtml(shortName(h.name))}</div>
-        ${weekly}${res ? renderLegs(res) : ""}
-      </div>
-      <button class="del" data-id="${h.id}" data-kind="living" title="Remove">✕</button>`;
-    el.appendChild(card);
-  });
+  state.living
+    .map((h, idx) => ({ h, idx }))
+    .sort((a, b) => orderOf(a.idx) - orderOf(b.idx))
+    .forEach(({ h, idx }) => el.appendChild(livingCard(h, resultOf(idx))));
 }
 
 // Score badge: 100% = shortest total commute, 50% = twice as long.
@@ -266,10 +296,36 @@ function renderLegs(res) {
   return `<div class="legs">${rows}</div>`;
 }
 
+// Centre of gravity of the counted targets, weighted by the travel time each
+// one costs per kilometre: weight = trips per week ÷ speed of its mode. Going
+// somewhere twice as often, or on foot instead of by car, pulls it in harder.
+// Purely geometric — it's a hint of where to look, not a routed result.
+function centerOfGravity() {
+  let sumW = 0, lat = 0, lng = 0, counted = 0;
+  state.targets.forEach((t) => {
+    if (!t.enabled) return;
+    const w = (Number(t.trips) || 0) / (MODE_SPEED_KMH[t.mode] || 50);
+    if (w <= 0) return;
+    sumW += w; lat += t.lat * w; lng += t.lng * w; counted++;
+  });
+  if (!sumW) return null;
+  return { lat: lat / sumW, lng: lng / sumW, counted };
+}
+
+// Popups hold a live card, so it is rebuilt from current state on every open.
+const CARD_POPUP = { minWidth: 260, maxWidth: 320, className: "card-popup" };
+
 function renderMarkers() {
+  // Everything is rebuilt from scratch, so remember which popup was open and
+  // put it back afterwards — editing from a popup must not close it.
+  const open = ["targets", "living"].flatMap((kind) =>
+    Object.entries(markers[kind]).filter(([, m]) => m.isPopupOpen()).map(([id]) => ({ kind, id })));
+
   Object.values(markers.targets).forEach((m) => map.removeLayer(m));
   Object.values(markers.living).forEach((m) => map.removeLayer(m));
-  markers = { targets: {}, living: {} };
+  if (markers.cog) map.removeLayer(markers.cog);
+  markers.cogLines.forEach((l) => map.removeLayer(l));
+  markers = { targets: {}, living: {}, cog: null, cogLines: [] };
 
   state.targets.forEach((t) => {
     const icon = L.divIcon({
@@ -277,18 +333,41 @@ function renderMarkers() {
       html: `<div class="marker-pin${t.enabled ? "" : " off"}">${MODES[t.mode].emoji}</div>`,
       iconSize: [30, 30], iconAnchor: [15, 15],
     });
-    markers.targets[t.id] = L.marker([t.lat, t.lng], { icon }).addTo(map).bindPopup(popupHtml(t.name));
+    markers.targets[t.id] = L.marker([t.lat, t.lng], { icon }).addTo(map)
+      .bindPopup(() => targetCard(t), CARD_POPUP);
   });
-  const scoreOf = {};
-  lastResults.forEach((r) => { scoreOf[r.index] = r.score_pct; });
   state.living.forEach((h, idx) => {
     const icon = L.divIcon({
       className: "",
-      html: scoreBadge(scoreOf[idx], "living-marker"),
+      html: scoreBadge((resultOf(idx) || {}).score_pct, "living-marker"),
       iconSize: [42, 22], iconAnchor: [21, 11],
     });
-    markers.living[h.id] = L.marker([h.lat, h.lng], { icon }).addTo(map).bindPopup(popupHtml(h.name));
+    markers.living[h.id] = L.marker([h.lat, h.lng], { icon }).addTo(map)
+      .bindPopup(() => livingCard(h, resultOf(idx)), CARD_POPUP);
   });
+
+  open.forEach(({ kind, id }) => {
+    if (markers[kind][id]) markers[kind][id].openPopup();
+  });
+
+  // Centre of gravity, tied to every target it accounts for by a dotted line.
+  const cog = centerOfGravity();
+  if (cog) {
+    state.targets.forEach((t) => {
+      if (!t.enabled || !(Number(t.trips) > 0)) return;
+      markers.cogLines.push(L.polyline([[cog.lat, cog.lng], [t.lat, t.lng]], {
+        color: "#7a51c9", weight: 2,  // = --cog (SVG stroke, so no CSS var) opacity: .75, dashArray: "3 6", interactive: false,
+      }).addTo(map));
+    });
+    const icon = L.divIcon({
+      className: "", html: `<div class="cog-marker">◎</div>`,
+      iconSize: [26, 26], iconAnchor: [13, 13],
+    });
+    markers.cog = L.marker([cog.lat, cog.lng], { icon, zIndexOffset: -200 })
+      .addTo(map)
+      .bindPopup(`<b>Centre of gravity</b><br />${cog.counted} target${cog.counted > 1 ? "s" : ""},
+        weighted by frequency and transport mode.`);
+  }
 }
 
 // ---------- Compute ----------
@@ -352,9 +431,9 @@ document.addEventListener("click", (e) => {
 document.getElementById("addTargetBtn").onclick = () => { searchInsertMode = "target"; setPlacing(placing === "target" ? null : "target"); };
 document.getElementById("addLivingBtn").onclick = () => { searchInsertMode = "living"; setPlacing(placing === "living" ? null : "living"); };
 
-document.getElementById("targets").addEventListener("change", (e) => {
-  const id = e.target.dataset.id;
-  const t = state.targets.find((x) => x.id === id);
+// Delegated on <body> so target cards work in the sidebar and in map popups alike.
+document.body.addEventListener("change", (e) => {
+  const t = state.targets.find((x) => x.id === e.target.dataset.id);
   if (!t) return;
   if (e.target.classList.contains("mode")) t.mode = e.target.value;
   if (e.target.classList.contains("trips")) t.trips = Number(e.target.value) || 0;
@@ -371,10 +450,6 @@ document.body.addEventListener("click", (e) => {
 
 // ---------- Utils ----------
 function shortName(n) { return n.split(",").slice(0, 2).join(",").trim(); }
-// Map popup: one line, ellipsised if too long — full name on hover.
-function popupHtml(name) {
-  return `<span class="popup-name" title="${escapeHtml(name)}">${escapeHtml(shortName(name))}</span>`;
-}
 function escapeHtml(s) { return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 function fmtNum(n) { return String(Number(n)); }
 function fmtDuration(min) {
@@ -390,6 +465,7 @@ function fmtDuration(min) {
   try {
     const cfg = await (await fetch("/api/config")).json();
     if (!cfg.has_key) document.getElementById("keywarn").style.display = "block";
+    if (cfg.transit_speed_kmh > 0) MODE_SPEED_KMH.transit = cfg.transit_speed_kmh;
   } catch (e) {}
   render();
   if (state.living.length || state.targets.length) {

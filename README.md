@@ -21,6 +21,12 @@ ranked by **total weekly commute time**.
   becomes a percentage against the best home (`100 × best / total`), so homes
   within a few minutes of each other read as equivalent. Each home lists the
   per-target detail: one-way time and the cumulated weekly time it contributes.
+- **Centre of gravity** — a dotted-line hub on the map, at the weighted average
+  of the counted targets. Each target's weight is `trips_per_week ÷ speed of its
+  mode` (car 50, transit `TRANSIT_SPEED_KMH`, bike 15, foot 5 km/h), i.e. how
+  much travel time it costs per kilometre — so a daily walk pulls the centre far
+  harder than a monthly drive. It is straight-line geometry, not routing: a free
+  hint of where to look, computed in the browser with no API call.
 - **Caching** — one-way times are cached server-side per
   `(home, target, transport mode)`. Only never-seen pairs are sent to
   OpenRouteService, so changing a target's frequency (or re-ranking existing
@@ -57,9 +63,16 @@ Open <http://localhost:8000>.
 
 1. Click **📍 Add target**, then click the map (or use search) to place a spot
    you regularly go to. Set its transport mode and trips per week.
-2. Click **🏠 Add home**, then place candidate homes.
-3. Homes are listed best first, each with a score: **100%** is the shortest
+2. The purple **◎** marker is the centre of gravity of your targets, linked to
+   each of them by a dotted line. Use it as a starting point for where to hunt.
+3. Click **🏠 Add home**, then place candidate homes.
+4. Homes are listed best first, each with a score: **100%** is the shortest
    total weekly commute, 50% means twice as long. Homes a few minutes apart
    score almost the same.
-4. Uncheck a target to leave it out of the totals without deleting it
-   (it stays on the map, greyed out, and costs no routing call).
+5. Uncheck a target to leave it out of the totals without deleting it
+   (it stays on the map, greyed out, drops out of the centre of gravity, and
+   costs no routing call).
+6. Clicking any marker opens its sidebar card right on the map — same controls,
+   same travel details (score, weekly total, per-target legs for a home; mode,
+   frequency, counted-or-not and remove for a target). Editing from the popup
+   updates the sidebar, and vice versa: it is literally the same card.
